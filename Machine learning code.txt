@@ -1,0 +1,57 @@
+from azureml.core import Workspace, Environment, Datastore
+from azureml.core.experiment import Experiment
+from azureml.core.run import Run
+from azureml.core.model import Model
+
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.model_selection import cross_val_score, train_test_split
+from sklearn.metrics import accuracy_score
+import joblib
+import numpy as np
+import pandas as pd
+
+ws = Workspace.from_config()
+
+# Load data
+ds = Datastore.get(ws, "modernizeappstorage")
+ds.download(".", prefix="maintenancedata/HistoricalMaintenanceRecord.csv")
+f = open("maintenancedata/HistoricalMaintenanceRecord.csv")
+data = np.loadtxt(f, delimiter=",")
+df = pd.DataFrame(data=data, columns=['Pressure','MachineTemperature','Label'])
+X = df[['Pressure','MachineTemperature']]
+y = df[['Label']]
+X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=1)
+
+# Begin experiment
+experiment = Experiment(workspace=ws, name="Stamp_Press_Experiment")
+run = experiment.start_logging()
+
+# Fit the data to a decision tree
+clf = DecisionTreeClassifier()
+clf.fit(X_train, y_train)
+
+# Try the model on the hold-out data set and print accuracy.
+y_predict = clf.predict(X_test)
+accuracy = accuracy_score(y_test, y_predict)
+
+# Log the accuracy
+run.log('Accuracy', accuracy)
+
+print()
+print('#############################')
+print('Accuracy is {}'.format(accuracy))
+print('#############################')
+print()
+
+# Save the model and upload it to the run
+model_file_name = 'outputs/model.pkl'
+joblib.dump(value = clf, filename = model_file_name)
+
+# Typically, the run.upload_file() method would be used to capture saved files
+# However, as per the Azure documentation, files stored in the outputs/ directory are automatically captured by the current Run
+
+# Complete the run
+run.complete()
+
+# Register the model with the workspace
+model = run.register_model(model_name = 'stamp_press_model', model_path = model_file_name)
